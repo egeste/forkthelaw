@@ -44,7 +44,13 @@ jobs:
         continue-on-error: true
         run: |
           # Try to download the latest database from releases
-          gh release download latest -p 'law_library.db' || echo "No existing database found"
+          if gh release download latest -p 'law_library.db.gz'; then
+            echo "Downloaded compressed database, decompressing..."
+            gunzip law_library.db.gz
+            echo "Database ready"
+          else
+            echo "No existing database found"
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
 
