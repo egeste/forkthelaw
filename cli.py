@@ -158,6 +158,106 @@ def reset_stuck_jobs(db: Database):
     return count
 
 
+def handle_flc_commands(args, db):
+    """Handle federal law corpus (flc) commands."""
+    command = args.flc_command
+
+    if command == 'ingest':
+        source = args.source
+        limit = args.limit
+
+        if source == 'all':
+            from federal import usc_olrc, cfr_govinfo, federal_register
+            logger.info("Running full federal ingestion pipeline")
+            usc_olrc.run_pipeline(db, limit=limit)
+            cfr_govinfo.run_pipeline(db, limit=limit)
+            federal_register.run_pipeline(db, limit=limit)
+            logger.info("Full federal ingestion complete")
+
+        elif source == 'usc':
+            from federal import usc_olrc
+            result = usc_olrc.run_pipeline(db, limit=limit)
+            print(f"USC ingestion: {result}")
+
+        elif source == 'public-laws':
+            from federal import public_laws
+            result = public_laws.run_pipeline(db, limit=limit)
+            print(f"Public Laws ingestion: {result}")
+
+        elif source == 'cfr':
+            from federal import cfr_govinfo
+            result = cfr_govinfo.run_pipeline(
+                db, limit=limit,
+                title=args.title,
+                parts=args.parts
+            )
+            print(f"CFR ingestion: {result}")
+
+        elif source == 'ecfr':
+            from federal import ecfr_api
+            result = ecfr_api.run_pipeline(
+                db, limit=limit,
+                title=args.title,
+                parts=args.parts,
+                days=args.days
+            )
+            print(f"eCFR ingestion: {result}")
+
+        elif source == 'fr':
+            from federal import federal_register
+            result = federal_register.run_pipeline(
+                db, limit=limit,
+                query=args.query
+            )
+            print(f"Federal Register ingestion: {result}")
+
+        elif source == 'bills':
+            from federal import gpo_bill_status
+            result = gpo_bill_status.run_pipeline(
+                db, limit=limit,
+                congress=args.congress
+            )
+            print(f"Bills ingestion: {result}")
+
+        else:
+            logger.error(f"Unknown source: {source}")
+            sys.exit(1)
+
+    elif command == 'point-in-time':
+        cfr_id = args.id
+        date = args.date
+        logger.info(f"Querying point-in-time CFR: {cfr_id} at {date}")
+        # TODO: Implement point-in-time query
+        print(f"Point-in-time query for {cfr_id} at {date} (not yet implemented)")
+
+    elif command == 'graph':
+        output_file = args.out
+        logger.info(f"Exporting edges to {output_file}")
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT src_id, src_type, dst_id, dst_type, rel_type, meta_json FROM edge")
+            rows = cursor.fetchall()
+
+            import csv
+            with open(output_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['src_id', 'src_type', 'dst_id', 'dst_type', 'rel_type', 'meta_json'])
+                for row in rows:
+                    writer.writerow(row)
+
+        logger.info(f"Exported {len(rows)} edges to {output_file}")
+        print(f"Exported {len(rows)} edges to {output_file}")
+
+    elif command == 'stats':
+        federal_stats = db.get_federal_stats()
+        print("\n" + "=" * 60)
+        print("FEDERAL CORPUS STATISTICS")
+        print("=" * 60)
+        for label, count in federal_stats.items():
+            print(f"  {label:25} {count:,}")
+        print("=" * 60 + "\n")
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -179,6 +279,21 @@ Examples:
 
   # Reset stuck jobs
   %(prog)s reset
+
+Federal Corpus Examples:
+  # Ingest all federal sources (limited)
+  %(prog)s flc ingest all --limit 5
+
+  # Ingest specific sources
+  %(prog)s flc ingest usc --limit 5
+  %(prog)s flc ingest cfr --title 21 --parts 1300,1308 --limit 10
+  %(prog)s flc ingest fr --query "21 CFR 1308" --limit 5
+
+  # Export edges
+  %(prog)s flc graph edges --out edges.csv
+
+  # Show federal stats
+  %(prog)s flc stats
         """
     )
 
@@ -219,6 +334,36 @@ Examples:
 
     # Reset command
     subparsers.add_parser('reset', help='Reset stuck jobs to pending status')
+
+    # Federal Law Corpus (flc) commands
+    flc_parser = subparsers.add_parser('flc', help='Federal law corpus commands')
+    flc_subparsers = flc_parser.add_subparsers(dest='flc_command', help='FLC subcommand')
+
+    # flc ingest
+    ingest_parser = flc_subparsers.add_parser('ingest', help='Ingest federal sources')
+    ingest_parser.add_argument('source', choices=['all', 'usc', 'public-laws', 'cfr', 'ecfr', 'fr', 'bills'],
+                                help='Source to ingest')
+    ingest_parser.add_argument('--limit', type=int, help='Limit number of items to process')
+    ingest_parser.add_argument('--title', type=int, help='CFR/eCFR: Title number')
+    ingest_parser.add_argument('--parts', type=lambda s: [int(p) for p in s.split(',')],
+                               help='CFR/eCFR: Comma-separated part numbers')
+    ingest_parser.add_argument('--days', type=int, default=3, help='eCFR: Number of days to fetch')
+    ingest_parser.add_argument('--query', type=str, help='FR: Search query')
+    ingest_parser.add_argument('--congress', type=int, help='Bills: Congress number')
+
+    # flc point-in-time
+    pit_parser = flc_subparsers.add_parser('point-in-time', help='Query point-in-time CFR')
+    pit_parser.add_argument('cfr', help='(unused positional for interface)')
+    pit_parser.add_argument('--id', required=True, help='CFR ID (e.g., cfr:21:1308:12)')
+    pit_parser.add_argument('--date', required=True, help='Date (YYYY-MM-DD)')
+
+    # flc graph
+    graph_parser = flc_subparsers.add_parser('graph', help='Export relationship graph')
+    graph_parser.add_argument('edges', help='(unused positional for interface)')
+    graph_parser.add_argument('--out', required=True, help='Output CSV file')
+
+    # flc stats
+    flc_subparsers.add_parser('stats', help='Show federal corpus statistics')
 
     args = parser.parse_args()
 
@@ -284,6 +429,9 @@ Examples:
         count = reset_stuck_jobs(db)
         print(f"Reset {count} stuck jobs to pending status")
         show_stats(db)
+
+    elif args.command == 'flc':
+        handle_flc_commands(args, db)
 
     else:
         parser.print_help()

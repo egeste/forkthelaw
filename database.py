@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from contextlib import contextmanager
+from pathlib import Path
 
 
 class Database:
@@ -205,6 +206,9 @@ class Database:
 
             print(f"Database initialized at {self.db_path}")
 
+            # Initialize federal tables if DDL file exists
+            self._init_federal_tables()
+
     def add_job(self, job_type: str, url: str, params: Optional[Dict[str, Any]] = None,
                 priority: int = 5) -> Optional[int]:
         """Add a job to the queue. Returns job_id or None if duplicate."""
@@ -376,3 +380,88 @@ class Database:
                 (rule_set, rule_number, title, text_content, html_content, url)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (rule_set, rule_number, title, text_content, html_content, url))
+
+    def _init_federal_tables(self):
+        """Initialize federal corpus tables from DDL file."""
+        ddl_path = Path(__file__).parent / "federal" / "sql" / "ddl.sql"
+        if not ddl_path.exists():
+            return
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            with open(ddl_path, 'r') as f:
+                ddl_sql = f.read()
+                # Execute each statement separately
+                for statement in ddl_sql.split(';'):
+                    statement = statement.strip()
+                    if statement:
+                        cursor.execute(statement)
+
+            # Also create views
+            views_path = Path(__file__).parent / "federal" / "sql" / "views.sql"
+            if views_path.exists():
+                with open(views_path, 'r') as f:
+                    views_sql = f.read()
+                    for statement in views_sql.split(';'):
+                        statement = statement.strip()
+                        if statement:
+                            try:
+                                cursor.execute(statement)
+                            except sqlite3.OperationalError:
+                                # View might already exist
+                                pass
+
+    def get_federal_stats(self) -> Dict[str, int]:
+        """Get statistics for federal corpus tables."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            stats = {}
+
+            tables = [
+                ('usc_section', 'USC Sections'),
+                ('public_law', 'Public Laws'),
+                ('stat_page', 'Stat Pages'),
+                ('cfr_unit', 'CFR Units'),
+                ('ecfr_version', 'eCFR Versions'),
+                ('fr_document', 'FR Documents'),
+                ('bill', 'Bills'),
+                ('bill_version', 'Bill Versions'),
+                ('edge', 'Edges')
+            ]
+
+            for table_name, label in tables:
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+                    stats[label] = cursor.fetchone()[0]
+                except sqlite3.OperationalError:
+                    # Table doesn't exist yet
+                    stats[label] = 0
+
+            return stats
+
+    def upsert_ingestion_state(self, source: str, state: Dict[str, Any], success: bool = True):
+        """Update ingestion state for a source."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute("""
+                INSERT INTO ingestion_state (source, last_run, last_success, state_json, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(source) DO UPDATE SET
+                    last_run = excluded.last_run,
+                    last_success = CASE WHEN ? THEN excluded.last_success ELSE last_success END,
+                    state_json = excluded.state_json,
+                    updated_at = excluded.updated_at
+            """, (source, now, now if success else None, json.dumps(state), now, success))
+
+    def get_ingestion_state(self, source: str) -> Optional[Dict[str, Any]]:
+        """Get ingestion state for a source."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT state_json FROM ingestion_state WHERE source = ?
+            """, (source,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                return json.loads(row[0])
+            return None

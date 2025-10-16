@@ -135,6 +135,64 @@ With default settings (2 workers, 3 hours/day):
 4. **Be respectful:** Don't decrease rate limits
 5. **Multiple runs:** Split into 3×1 hour runs for faster progress
 
+## 🏛️ Federal Corpus Ingestion
+
+In addition to crawling Cornell LII, you can ingest primary federal sources directly:
+
+### Quick Start
+
+```bash
+# Install dependencies (if not already done)
+pip install -r requirements.txt
+
+# Ingest all federal sources (limited for testing)
+python cli.py flc ingest all --limit 5
+
+# Show federal corpus statistics
+python cli.py flc stats
+
+# Run full smoke test
+bash test_workflow.sh
+```
+
+### Available Commands
+
+```bash
+# Ingest specific sources
+python cli.py flc ingest usc --limit 5
+python cli.py flc ingest cfr --title 21 --parts 1300,1308 --limit 10
+python cli.py flc ingest fr --query "21 CFR 1308" --limit 5
+
+# Export relationship graph
+python cli.py flc graph edges --out edges.csv
+
+# Query point-in-time CFR (placeholder)
+python cli.py flc point-in-time cfr --id cfr:21:1308:12 --date 2021-03-15
+```
+
+### Database Tables
+
+The federal system adds these tables:
+- `usc_section` - United States Code
+- `cfr_unit` - Code of Federal Regulations
+- `public_law` - Public Laws
+- `fr_document` - Federal Register
+- `bill` - Congressional Bills
+- `edge` - Relationships between sources
+
+### Testing
+
+```bash
+# Run unit tests
+pytest tests/ -v
+
+# Run full workflow smoke test
+bash test_workflow.sh
+
+# Check what tables were created
+sqlite3 test_law_library.db ".tables"
+```
+
 ## 🎉 Success!
 
 Once set up, the crawler runs completely automatically:

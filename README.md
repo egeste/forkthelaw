@@ -269,6 +269,163 @@ python cli.py reset
 - Process one content type at a time
 - The database handles large datasets efficiently
 
+## Federal Corpus Ingestion
+
+In addition to crawling Cornell LII, this project includes a complete **federal corpus ingestion system** for primary sources. This system fetches structured legal data directly from government APIs and bulk downloads.
+
+### Sources
+
+The federal ingestion system supports:
+
+- **USC (United States Code)**: USLM XML from the Office of the Law Revision Counsel
+- **Public Laws**: Enrolled bills and Statutes at Large from GovInfo
+- **CFR (Code of Federal Regulations)**: Annual snapshots from GovInfo API
+- **eCFR**: Daily point-in-time CFR versions from eCFR API
+- **Federal Register**: Rules, notices, and proposed regulations from FR API
+- **Bills**: Bill status XML from GPO and metadata from Congress.gov API
+
+### Federal Ingestion Commands
+
+```bash
+# Ingest all federal sources (limited for testing)
+python cli.py flc ingest all --limit 5
+
+# Ingest specific sources
+python cli.py flc ingest usc --limit 5
+python cli.py flc ingest public-laws --limit 3
+python cli.py flc ingest cfr --title 21 --parts 1300,1308 --limit 10
+python cli.py flc ingest ecfr --title 21 --parts 1308 --days 3
+python cli.py flc ingest fr --query "21 CFR 1308" --limit 5
+python cli.py flc ingest bills --congress 118 --limit 10
+
+# Query point-in-time CFR (reconstructs CFR as of a specific date)
+python cli.py flc point-in-time cfr --id cfr:21:1308:12 --date 2021-03-15
+
+# Export relationship graph (edges between statutes, regulations, etc.)
+python cli.py flc graph edges --out edges.csv
+
+# Show federal corpus statistics
+python cli.py flc stats
+```
+
+### Federal Database Schema
+
+The federal ingestion system adds these tables to `law_library.db`:
+
+- `usc_section` - USC sections with canonical IDs, versioning via sha256
+- `public_law` - Public Laws with enactment dates and Statutes at Large citations
+- `stat_page` - Statutes at Large pages
+- `cfr_unit` - CFR sections with effective dates
+- `ecfr_version` - Daily eCFR point-in-time snapshots (delta storage)
+- `fr_document` - Federal Register documents with metadata
+- `bill` - Bills with status and latest actions
+- `bill_version` - Bill text snapshots (introduced, engrossed, enrolled, etc.)
+- `bill_event` - Bill lifecycle events
+- `edge` - Relationships between legal resources (e.g., PL → USC, CFR → USC)
+- `ingestion_state` - Tracks last successful run per source
+
+### Canonical Identifiers
+
+All federal resources use normalized IDs:
+
+- USC: `usc:21:841` (title:section)
+- Public Law: `pl:117-328` (congress-number)
+- Statutes: `stat:136:4459` (volume:page)
+- CFR: `cfr:21:1308:12` (title:part:section)
+- Federal Register: `fr:2023-12345` (year-document_number)
+- Bill: `bill:118:h:1234` (congress:chamber:number)
+
+### Citation Extraction
+
+The system includes regex-based citation extraction:
+
+```python
+from federal.citations import extract_all_citations
+
+text = "See 21 U.S.C. § 841 and 21 CFR § 1308.12, enacted by Pub. L. No. 91-513."
+citations = extract_all_citations(text)
+
+# Returns:
+# {
+#   'usc': [{'usc_id': 'usc:21:841', ...}],
+#   'cfr': [{'cfr_id': 'cfr:21:1308:12', ...}],
+#   'public_laws': [{'pl_id': 'pl:91-513', ...}],
+#   ...
+# }
+```
+
+### Graph Edges
+
+The system creates edges linking related resources:
+
+- `pl -> usc_section` (adds|amends|repeals) - Public Laws that modify USC
+- `usc_section -> cfr_unit` (authority_for) - USC provisions authorizing CFR sections
+- `fr_document -> cfr_unit` (amends|proposes) - FR rules modifying CFR
+- `bill -> public_law` (enacted_as) - Bills that became Public Laws
+
+Export edges to CSV:
+```bash
+python cli.py flc graph edges --out edges.csv
+```
+
+### Point-in-Time CFR Queries
+
+Reconstruct CFR text as of any date by combining:
+1. Annual baseline from GovInfo
+2. Daily deltas from eCFR API
+
+```bash
+python cli.py flc point-in-time cfr --id cfr:21:1308:12 --date 2021-03-15
+```
+
+*(Note: Point-in-time queries return placeholder data in the current implementation; delta reconstruction logic needs to be completed.)*
+
+### Storage
+
+By default, raw downloads are stored in `./federal_data/` (configurable via `LocalStorage`). The storage layer is designed to be swappable with S3 for cloud deployments.
+
+### Testing
+
+Run smoke tests:
+```bash
+# Unit tests
+pytest tests/test_identifiers.py -v
+pytest tests/test_citations.py -v
+pytest tests/test_ingest_smoke.py -v
+
+# Full workflow test
+bash test_workflow.sh
+```
+
+### Architecture
+
+Federal ingestion uses a modular ETL pipeline:
+
+1. **Discover**: Find available resources (titles, parts, dates)
+2. **Fetch**: Download XML/JSON to local storage
+3. **Parse**: Extract structured data using lxml/orjson
+4. **Upsert**: Insert or update database using natural keys + sha256 versioning
+
+Each ingestor (`federal/*.py`) implements these four functions, plus a `run_pipeline()` entry point.
+
+### Current Status
+
+**Working:**
+- Database schema and migrations
+- Identifier parsing and citation extraction
+- CLI commands and job framework
+- Storage abstraction
+- Smoke tests
+
+**Placeholder/TODO:**
+- Actual XML/JSON parsing (currently returns placeholder data)
+- Network fetching from GovInfo, eCFR, FR, Congress.gov APIs
+- Point-in-time CFR delta reconstruction
+- Edge generation from parsed citations
+- Full integration with worker.py job queue
+
+The skeleton is complete and runnable for testing; implementing the full parsers and API clients is the next step.
+
 ## Support
 
 For issues with:

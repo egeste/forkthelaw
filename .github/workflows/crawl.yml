@@ -123,9 +123,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: law_library_db_${{ github.run_number }}
-          path: |
-            law_library.db
-            law_library.db.gz
+          path: law_library.db.gz
           retention-days: 7
 
       - name: Create or update release with database
