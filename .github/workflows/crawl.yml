@@ -1,0 +1,164 @@
+name: Daily Law Crawler
+
+on:
+  # Run daily at 2 AM UTC
+  schedule:
+    - cron: '0 2 * * *'
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: 'Duration in minutes (max 180)'
+        required: false
+        default: '180'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 185  # 3 hours + 5 minutes buffer
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Need full history to push back to main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Download existing database from release
+        id: download_db
+        continue-on-error: true
+        run: |
+          # Try to download the latest database from releases
+          gh release download latest -p 'law_library.db' || echo "No existing database found"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Initialize database if needed
+        run: |
+          if [ ! -f law_library.db ]; then
+            echo "Initializing new database and seeding jobs..."
+            python cli.py seed --all
+          else
+            echo "Using existing database"
+            python cli.py stats
+          fi
+
+      - name: Reset stuck jobs
+        run: |
+          python cli.py reset
+
+      - name: Run crawler with timeout
+        id: crawl
+        run: |
+          # Set duration (default 180 minutes for scheduled runs)
+          DURATION="${{ github.event.inputs.duration_minutes }}"
+          if [ -z "$DURATION" ]; then
+            DURATION=180
+          fi
+
+          # Calculate timeout in seconds
+          TIMEOUT=$((DURATION * 60))
+
+          echo "Running crawler for ${DURATION} minutes (${TIMEOUT} seconds)..."
+
+          # Run crawler with timeout using GNU timeout command
+          timeout ${TIMEOUT}s python cli.py run --workers 2 --delay 10.0 || {
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -eq 124 ]; then
+              echo "Crawler stopped after ${DURATION} minutes (timeout reached)"
+              echo "status=timeout" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "Crawler failed with exit code $EXIT_CODE"
+              exit $EXIT_CODE
+            fi
+          }
+
+          echo "status=completed" >> $GITHUB_OUTPUT
+
+      - name: Show final statistics
+        if: always()
+        run: |
+          python cli.py stats
+
+          # Show database size
+          ls -lh law_library.db
+
+          # Show queue breakdown
+          echo ""
+          echo "=== Job Queue Breakdown ==="
+          sqlite3 law_library.db "SELECT job_type, status, COUNT(*) as count FROM job_queue GROUP BY job_type, status ORDER BY job_type, status;"
+
+      - name: Compress database
+        if: always()
+        run: |
+          # Compress the database for faster upload/download
+          echo "Compressing database..."
+          gzip -k law_library.db
+          ls -lh law_library.db.gz
+
+      - name: Upload database as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: law_library_db_${{ github.run_number }}
+          path: |
+            law_library.db
+            law_library.db.gz
+          retention-days: 7
+
+      - name: Create or update release with database
+        if: always()
+        run: |
+          # Delete existing release and tag if they exist
+          gh release delete latest --yes || true
+          git push origin :refs/tags/latest || true
+
+          # Create new release with the database
+          gh release create latest \
+            law_library.db.gz \
+            --title "Latest Law Library Database" \
+            --notes "Database updated on $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          Run #${{ github.run_number }}
+          Status: ${{ steps.crawl.outputs.status }}
+
+          Download and decompress:
+          \`\`\`bash
+          gh release download latest -p 'law_library.db.gz'
+          gunzip law_library.db.gz
+          \`\`\`
+
+          Or use the workflow artifact for the uncompressed version."
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Commit database changes (optional)
+        if: false  # Disabled by default - database is too large for git
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Only commit if there are changes
+          if git diff --quiet law_library.db; then
+            echo "No changes to database"
+          else
+            git add law_library.db
+            git commit -m "Update law library database - Run #${{ github.run_number }}"
+            git push
+          fi
