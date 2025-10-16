@@ -129,8 +129,11 @@ jobs:
           retention-days: 7
 
       - name: Create or update release with database
-        if: always()
+        if: success() || steps.crawl.outputs.status == 'timeout'
         run: |
+          # Only update release if crawl succeeded or timed out (meaning it made progress)
+          # Don't update if crawl failed or was cancelled
+
           # Delete existing release and tag if they exist
           gh release delete latest --yes || true
           git push origin :refs/tags/latest || true
