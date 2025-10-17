@@ -1,13 +1,17 @@
 name: Law Crawler
 
 on:
+  # Run at the top of every hour
+  schedule:
+    - cron: '0 * * * *'  # Every hour at :00
+
   # Allow manual triggering
   workflow_dispatch:
     inputs:
       duration_minutes:
-        description: 'Duration in minutes (max 180)'
+        description: 'Duration in minutes (max 45)'
         required: false
-        default: '180'
+        default: '45'
         type: string
 
 permissions:
@@ -16,7 +20,7 @@ permissions:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 185  # 3 hours + 5 minutes buffer
+    timeout-minutes: 50  # 45 minutes + 5 minutes buffer
 
     steps:
       - name: Checkout code
@@ -67,10 +71,10 @@ jobs:
       - name: Run crawler with timeout
         id: crawl
         run: |
-          # Set duration (default 180 minutes for scheduled runs)
+          # Set duration (default 45 minutes for scheduled runs)
           DURATION="${{ github.event.inputs.duration_minutes }}"
           if [ -z "$DURATION" ]; then
-            DURATION=180
+            DURATION=45
           fi
 
           # Calculate timeout in seconds

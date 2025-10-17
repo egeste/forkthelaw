@@ -1,9 +1,9 @@
 name: Crawler Status Report
 
 on:
-  # Run after the daily crawl
+  # Run 50 minutes after every hour (after 45-min crawl + buffer)
   schedule:
-    - cron: '0 6 * * *'  # 6 AM UTC (after 2 AM crawl + 3 hours + buffer)
+    - cron: '50 * * * *'  # 50 minutes past every hour
 
   # Allow manual triggering
   workflow_dispatch:
