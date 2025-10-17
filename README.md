@@ -4,9 +4,11 @@ A queue-based web scraper that downloads and archives legal content from [Cornel
 
 ## 🤖 Automated Crawling with GitHub Actions
 
-**NEW:** This repository includes GitHub Actions workflows that automatically crawl the law library for 3 hours daily! The database is persisted between runs, allowing you to build a complete archive without running anything locally.
+This repository includes GitHub Actions workflows that automatically crawl the law library! The database is persisted between runs, allowing you to build a complete archive without running anything locally.
 
-👉 **[See GitHub Actions Setup Guide](GITHUB_ACTIONS.md)** for automated daily crawling.
+The crawler runs on-demand via manual workflow dispatch. You can configure the duration (up to 180 minutes).
+
+👉 **[See GitHub Actions Setup Guide](GITHUB_ACTIONS.md)** for automated crawling setup.
 
 ## Features
 
@@ -42,6 +44,16 @@ cd forkthelaw
 # Install dependencies
 pip install -r requirements.txt
 ```
+
+**Dependencies:**
+- Python 3.11+
+- requests, beautifulsoup4, lxml (for web scraping)
+- pydantic (for data validation)
+- sqlalchemy (for database schema management)
+- orjson (for JSON parsing)
+- tenacity (for retry logic)
+- tqdm (for progress bars)
+- pytest (for testing)
 
 ## Usage
 
@@ -106,12 +118,14 @@ The system is designed to be stopped and resumed:
 ```bash
 # Stop with Ctrl+C (graceful shutdown)
 
-# Reset any stuck jobs (optional)
+# Reset any stuck jobs
 python cli.py reset
 
 # Resume processing
 python cli.py run --workers 1
 ```
+
+**Note:** Always run `reset` after stopping to ensure jobs stuck in "processing" state are returned to the queue.
 
 ## Database Schema
 
@@ -132,6 +146,8 @@ The system creates `law_library.db` with the following tables:
 
 ### Full-Text Search
 - `documents_fts` - FTS5 virtual table for fast text search
+
+**See [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) for detailed schema documentation including foreign key relationships and views.**
 
 ## Querying the Database
 
@@ -225,7 +241,7 @@ class ScrapeNewContentJob(JobHandler):
 - **Download time**: With 10-second delays, expect ~6 requests/minute per worker
 - **US Code**: ~54,000+ sections (estimated 90+ hours with 1 worker)
 - **CFR**: ~200,000+ sections (estimated 333+ hours with 1 worker)
-- **Database size**: Plan for several GB of storage
+- **Database size**: Plan for several GB of storage (current production database: ~19 MB)
 
 Using 2 workers can approximately halve these times while staying within rate limits.
 
@@ -393,9 +409,11 @@ pytest tests/test_identifiers.py -v
 pytest tests/test_citations.py -v
 pytest tests/test_ingest_smoke.py -v
 
-# Full workflow test
+# Full workflow test (creates test_law_library.db)
 bash test_workflow.sh
 ```
+
+**Note:** The workflow test creates a temporary database (`test_law_library.db`) for testing purposes.
 
 ### Architecture
 
@@ -411,20 +429,29 @@ Each ingestor (`federal/*.py`) implements these four functions, plus a `run_pipe
 ### Current Status
 
 **Working:**
-- Database schema and migrations
+- Database schema with foreign key constraints ([DATABASE_SCHEMA.md](DATABASE_SCHEMA.md))
+- Schema migration script ([migrate_add_foreign_keys.py](migrate_add_foreign_keys.py:1))
 - Identifier parsing and citation extraction
-- CLI commands and job framework
-- Storage abstraction
-- Smoke tests
+- CLI commands (`flc` subcommands)
+- Storage abstraction (local file system, swappable with S3)
+- Unit tests ([tests/](tests/))
+- Smoke test workflow ([test_workflow.sh](test_workflow.sh:1))
 
 **Placeholder/TODO:**
 - Actual XML/JSON parsing (currently returns placeholder data)
 - Network fetching from GovInfo, eCFR, FR, Congress.gov APIs
-- Point-in-time CFR delta reconstruction
+- Point-in-time CFR delta reconstruction logic
 - Edge generation from parsed citations
 - Full integration with worker.py job queue
 
-The skeleton is complete and runnable for testing; implementing the full parsers and API clients is the next step.
+The skeleton is complete and runnable for testing. Next steps: implement parsers and API clients for each federal source.
+
+## Additional Documentation
+
+- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes with automated or manual crawling
+- **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Complete database schema with foreign keys and relationships
+- **[GITHUB_ACTIONS.md](GITHUB_ACTIONS.md)** - GitHub Actions automation setup guide
+- **[test_workflow.sh](test_workflow.sh)** - Smoke test script for federal corpus ingestion
 
 ## Support
 
