@@ -1,4 +1,4 @@
-name: Daily Law Crawler
+name: Law Crawler
 
 on:
   # Allow manual triggering
