@@ -1,10 +1,6 @@
 name: Daily Law Crawler
 
 on:
-  # Run daily at 2 AM UTC
-  schedule:
-    - cron: '0 2 * * *'
-
   # Allow manual triggering
   workflow_dispatch:
     inputs:

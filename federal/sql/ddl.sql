@@ -79,6 +79,8 @@ CREATE INDEX IF NOT EXISTS idx_cfr_effective ON cfr_unit(effective_date);
 CREATE INDEX IF NOT EXISTS idx_cfr_id ON cfr_unit(cfr_id);
 
 -- eCFR versions (daily point-in-time)
+-- Note: This references cfr_id as a natural key, not the integer primary key
+-- Multiple cfr_unit records can have the same cfr_id with different effective_dates
 CREATE TABLE IF NOT EXISTS ecfr_version (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cfr_id TEXT NOT NULL,
@@ -88,6 +90,8 @@ CREATE TABLE IF NOT EXISTS ecfr_version (
     source_path TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(cfr_id, version_date)
+    -- Note: No FK to cfr_unit because cfr_id is not unique in cfr_unit
+    -- The relationship is maintained through the cfr_id text field
 );
 
 CREATE INDEX IF NOT EXISTS idx_ecfr_cfr_id ON ecfr_version(cfr_id, version_date);

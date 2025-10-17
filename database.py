@@ -22,6 +22,8 @@ class Database:
         """Context manager for database connections."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        # Enable foreign key constraints for this connection
+        conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
             conn.commit()
@@ -35,6 +37,9 @@ class Database:
         """Initialize database schema."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+
+            # Enable foreign key constraints
+            cursor.execute("PRAGMA foreign_keys = ON")
 
             # Job queue table - tracks pending work
             cursor.execute("""
