@@ -8,10 +8,15 @@ import sys
 import logging
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from database import Database
 from worker import WorkerPool
 from rate_limiter import RateLimiter
 
+
+# Load .env file on module import
+load_dotenv(Path(__file__).parent / ".env")
 
 logging.basicConfig(
     level=logging.INFO,
